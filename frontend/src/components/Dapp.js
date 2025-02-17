@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 
 // We import the contract's artifacts and address here, as we are going to be
 // using them with ethers
-import TokenArtifact from "../contracts/NounsGameShowToken.json";
+// import TokenArtifact from "../contracts/NounsGameShowToken.json";
 import GameShowArtifact from "../contracts/GameShowBetting.json";
 import contractAddress from "../contracts/contract-address.json";
 
@@ -19,6 +19,10 @@ import { Transfer } from "./Transfer";
 import { TransactionErrorMessage } from "./TransactionErrorMessage";
 import { WaitingForTransactionMessage } from "./WaitingForTransactionMessage";
 import { NoTokensMessage } from "./NoTokensMessage";
+import { CreateGame } from "./CreateGame";
+import { GameBetOptions } from "./GameBetOptions";
+import { GameBetPlayer } from "./GameBetPlayer";
+import { keccak256, toUtf8Bytes } from "ethers/lib/utils";
 
 // This is the default id used by the Hardhat Network
 const HARDHAT_NETWORK_ID = '31337';
@@ -48,6 +52,9 @@ export class Dapp extends React.Component {
       // The user's address and balance
       selectedAddress: undefined,
       balance: undefined,
+      isManager: false,
+      // Game show information,
+      numGames: 0,
       // The ID about transactions being sent, and any possible error with them
       txBeingSent: undefined,
       transactionError: undefined,
@@ -73,8 +80,8 @@ export class Dapp extends React.Component {
     // clicks a button. This callback just calls the _connectWallet method.
     if (!this.state.selectedAddress) {
       return (
-        <ConnectWallet 
-          connectWallet={() => this._connectWallet()} 
+        <ConnectWallet
+          connectWallet={() => this._connectWallet()}
           networkError={this.state.networkError}
           dismiss={() => this._dismissNetworkError()}
         />
@@ -102,8 +109,69 @@ export class Dapp extends React.Component {
               </b>
               .
             </p>
+            <p>
+              Admin: {this.state.isManager.toString()}
+            </p>
           </div>
         </div>
+
+        {this.state.isManager && (
+          <div className="row">
+            <div className="col-12">
+              <p>
+                GameShow Host
+              </p>
+              <p>
+                Number of Games: {this.state.numGames}
+                <br/>
+                Current Prize Pool: {this.state.currentGame?.totalBetAmount.toNumber() ?? 0}
+              </p>
+              <CreateGame
+                createGame={(description) =>
+                  this._createGame(description)
+                }
+              />
+              {this.state.gameBetOptions && (
+                <GameBetOptions
+                  gameOptions={this.state.gameBetOptions}
+                  onAdd={(addOption) =>
+                    this._addGameBetOption(this.state.numGames - 1, addOption)
+                  }
+                  onRemove={(removeOption) =>
+                    this._addGameBetOption(this.state.numGames - 1, removeOption)
+                  }
+                  onClose={() =>
+                    this._closeGame(this.state.numGames - 1)
+                  }
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {!this.state.isManager && (
+          <div className="row">
+            <div className="col-12">
+              <p>
+                GameShow Player
+              </p>
+              <p>
+                Number of Games: {this.state.numGames}
+                <br/>
+                Current Prize Pool: {this.state.currentGame?.totalBetAmount.toNumber() ?? 0}
+              </p>
+              {this.state.gameBetOptions && (
+                <GameBetPlayer
+                  gameOptions={this.state.gameBetOptions}
+                  onBet={(betOption) =>
+                    this._placeBet(this.state.numGames - 1, betOption)
+                  }
+                />
+              )}
+            </div>
+          </div>
+        )}
+
 
         <hr />
 
@@ -191,7 +259,7 @@ export class Dapp extends React.Component {
       if (newAddress === undefined) {
         return this._resetState();
       }
-      
+
       this._initialize(newAddress);
     });
   }
@@ -218,11 +286,11 @@ export class Dapp extends React.Component {
     // We first initialize ethers by creating a provider using window.ethereum
     this._provider = new ethers.providers.Web3Provider(window.ethereum);
 
-    // Then, we initialize the contract using that provider and the token's
-    // artifact. You can do this same thing with your contracts.
+    // // Then, we initialize the contract using that provider and the token's
+    // // artifact. You can do this same thing with your contracts.
     this._token = new ethers.Contract(
       contractAddress.Token,
-      TokenArtifact.abi,
+      GameShowArtifact.abi,
       this._provider.getSigner(0)
     );
   }
@@ -235,10 +303,10 @@ export class Dapp extends React.Component {
   // don't need to poll it. If that's the case, you can just fetch it when you
   // initialize the app, as we do with the token data.
   _startPollingData() {
-    this._pollDataInterval = setInterval(() => this._updateBalance(), 1000);
-
-    // We run it once immediately so we don't have to wait for it
-    this._updateBalance();
+    this._pollDataInterval = setInterval(() => {
+      this._updateBalance();
+      this._getRole();
+    }, 1000);
   }
 
   _stopPollingData() {
@@ -251,13 +319,44 @@ export class Dapp extends React.Component {
   async _getTokenData() {
     const name = await this._token.name();
     const symbol = await this._token.symbol();
+    const numGames = await this._token.numGames();
 
     this.setState({ tokenData: { name, symbol } });
+    this.setState({ numGames: numGames.toNumber() });
+
+    this._getGameBetOptions(numGames.toNumber() - 1);
+
+    this._getGame(numGames.toNumber() - 1);
+  }
+
+  async _getGame(gameId) {
+    const game = await this._token.games(gameId);
+    console.log(game);
+    this.setState({ currentGame: game });
+  }
+
+  async _hasPlacedBet(gameId) {
+    const betPlaced = await this._token.hasPlacedBet(gameId);
+    this.setState({ betPlaced: betPlaced });
+  }
+
+  async _getRole() {
+    if (this.state.selectedAddress) {
+      try {
+        const MANAGER_ROLE = keccak256(toUtf8Bytes("MANAGER_ROLE"));
+        const isManager = await this._token.hasRole(MANAGER_ROLE, this.state.selectedAddress);
+        this.setState({ isManager: isManager });
+      } catch (e) {
+        this.setState({ isManager: false });
+      }
+    }
   }
 
   async _updateBalance() {
-    const balance = await this._token.balanceOf(this.state.selectedAddress);
-    this.setState({ balance });
+    if (this.state.selectedAddress) {
+      const balance = await this._token.balanceOf(this.state.selectedAddress);
+      this.setState({ balance });
+    }
   }
 
   // This method sends an ethereum transaction to transfer tokens.
@@ -301,7 +400,7 @@ export class Dapp extends React.Component {
 
       // If we got here, the transaction was successful, so you may want to
       // update your state. Here, we update the user's balance.
-      await this._updateBalance();
+      // await this._updateBalance();
     } catch (error) {
       // We check the error code to see if this error was produced because the
       // user rejected a tx. If that's the case, we do nothing.
@@ -318,6 +417,131 @@ export class Dapp extends React.Component {
       // this part of the state.
       this.setState({ txBeingSent: undefined });
     }
+  }
+
+  async _getGameBetOptions(gameId) {
+    const gameBetOptions = await this._token.getGameBetOptions(gameId);
+    if (gameBetOptions) {
+      this.setState({ gameBetOptions: gameBetOptions });
+    } else {
+      this.setState({ gameBetOptions: [] });
+    }
+  }
+
+  async _addGameBetOption(gameId, optionDescription) {
+    const addOptionTx = await this._token.addGameBetOption(gameId, optionDescription);
+    const addOptionReceipt = await addOptionTx.wait();
+    if (addOptionReceipt.status === 0) {
+      throw new Error("Transaction failed");
+    }
+    this._getGameBetOptions(gameId);
+  }
+
+  // This method sends an ethereum transaction to transfer tokens.
+  // While this action is specific to this application, it illustrates how to
+  // send a transaction.
+  async _createGame(description) {
+    try {
+      console.log("Creating game: ", description);
+      // We send the transaction, and save its hash in the Dapp's state. This
+      // way we can indicate that we are waiting for it to be mined.
+      const newGameTx = await this._token.createGame(description);
+
+      // We use .wait() to wait for the transaction to be mined. This method
+      // returns the transaction's receipt.
+      const newGameReceipt = await newGameTx.wait();
+
+      // The receipt, contains a status flag, which is 0 to indicate an error.
+      if (newGameReceipt.status === 0) {
+        // We can't know the exact error that made the transaction fail when it
+        // was mined, so we throw this generic one.
+        throw new Error("Transaction failed");
+      }
+
+      const numGames = await this._token.numGames();
+      this.setState({ numGames: numGames.toNumber() });
+
+      // If we got here, the transaction was successful, so you may want to
+      // update your state. Here, we update the user's balance.
+      // await this._updateBalance();
+    } catch (error) {
+      // Other errors are logged and stored in the Dapp's state. This is used to
+      // show them to the user, and for debugging.
+      console.error(error);
+      this.setState({ transactionError: error });
+    } finally {
+      // If we leave the try/catch, we aren't sending a tx anymore, so we clear
+      // this part of the state.
+      this.setState({ txBeingSent: undefined });
+    }
+  }
+
+  async _placeBet(gameId, betOption) {
+    try {
+      console.log("Placing bet on: ", gameId, " with option: ", betOption);
+      // We send the transaction, and save its hash in the Dapp's state. This
+      // way we can indicate that we are waiting for it to be mined.
+      const placeBetTx = await this._token.placeBet(gameId, betOption, { value: 50 });
+
+      // We use .wait() to wait for the transaction to be mined. This method
+      // returns the transaction's receipt.
+      const placeBetReceipt = await placeBetTx.wait();
+
+      // The receipt, contains a status flag, which is 0 to indicate an error.
+      if (placeBetReceipt.status === 0) {
+        // We can't know the exact error that made the transaction fail when it
+        // was mined, so we throw this generic one.
+        throw new Error("Transaction failed");
+      }
+
+      // If we got here, the transaction was successful, so you may want to
+      // update your state. Here, we update the user's balance.
+      await this._updateBalance();
+      await this._getGame(gameId);
+    } catch (error) {
+      // Other errors are logged and stored in the Dapp's state. This is used to
+      // show them to the user, and for debugging.
+      console.error(error);
+      this.setState({ transactionError: error });
+    } finally {
+      // If we leave the try/catch, we aren't sending a tx anymore, so we clear
+      // this part of the state.
+      this.setState({ txBeingSent: undefined });
+    }
+  }
+
+  async _closeGame(gameId) {
+    try {
+      console.log("Locking Game: ", gameId);
+      // We send the transaction, and save its hash in the Dapp's state. This
+      // way we can indicate that we are waiting for it to be mined.
+      const closeGameTx = await this._token.closeGame(gameId);
+
+      // We use .wait() to wait for the transaction to be mined. This method
+      // returns the transaction's receipt.
+      const closeGameReceipt = await closeGameTx.wait();
+
+      // The receipt, contains a status flag, which is 0 to indicate an error.
+      if (closeGameReceipt.status === 0) {
+        // We can't know the exact error that made the transaction fail when it
+        // was mined, so we throw this generic one.
+        throw new Error("Transaction failed");
+      }
+
+      // If we got here, the transaction was successful, so you may want to
+      // update your state. Here, we update the user's balance.
+      await this._updateBalance();
+      await this._getGame(gameId);
+    } catch (error) {
+      // Other errors are logged and stored in the Dapp's state. This is used to
+      // show them to the user, and for debugging.
+      console.error(error);
+      this.setState({ transactionError: error });
+    } finally {
+      // If we leave the try/catch, we aren't sending a tx anymore, so we clear
+      // this part of the state.
+      this.setState({ txBeingSent: undefined });
+    }    
   }
 
   // This method just clears part of the state.
