@@ -23,6 +23,14 @@ describe("GameShowBetting", function () {
 
       expect(await gameShowBetting.owner()).to.equal(owner.address);
     });
+
+    it("Should have name, symbol, and owner", async function () {
+      const { gameShowBetting, owner } = await loadFixture(deployBettingFixture);
+
+      expect(await gameShowBetting.name()).to.equal("Nouns Game Show");
+      expect(await gameShowBetting.symbol()).to.equal("NGS");
+      expect(await gameShowBetting.owner()).to.equal(owner.address);
+    });
   });
 
   describe("Setup", function () {

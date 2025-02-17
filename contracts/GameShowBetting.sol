@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import "./NounsGameShowToken.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "hardhat/console.sol";
 
-contract GameShowBetting is AccessControl {
+contract GameShowBetting is ERC20, AccessControl {
     address payable public owner;
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
 
@@ -37,7 +37,7 @@ contract GameShowBetting is AccessControl {
         bool isOpen;
         GameState state;
         BetOption[] betOptions;
-        uint totalBetAmount;
+        uint256 totalBetAmount;
         uint256 winningBetOption;
         mapping(address => bool) betPlaced;
         mapping(address => Bet) betPlacedOption;
@@ -48,18 +48,23 @@ contract GameShowBetting is AccessControl {
     uint256 public numGames;
 
     event NewGame(uint256 gameId, string description);
-    event NewGameBetOption(uint256 gameId, uint256 betOptionId, string description);
+    event NewGameBetOption(
+        uint256 gameId,
+        uint256 betOptionId,
+        string description
+    );
     event RemoveGameBetOption(uint256 gameId, uint256 betOptionId);
     event NewBet(uint256 gameId, uint256 betOption);
     event GameClosed(uint256 gameId);
     event WinnerDeclared(uint256 gameId, uint256 betOptionId);
     event WinnersPaidOut(uint256 gameId);
 
-    constructor() {
+    constructor() ERC20("Nouns Game Show", "NGS") {
         numGames = 0;
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER_ROLE, msg.sender);
         owner = payable(msg.sender);
+        _mint(msg.sender, 10000);
     }
 
     function createGame(
@@ -100,7 +105,11 @@ contract GameShowBetting is AccessControl {
             newBetOption.id,
             newBetOption.description
         );
-        emit NewGameBetOption(newBetOption.gameId, newBetOption.id, newBetOption.description);
+        emit NewGameBetOption(
+            newBetOption.gameId,
+            newBetOption.id,
+            newBetOption.description
+        );
     }
 
     function removeGameBetOption(
@@ -109,7 +118,10 @@ contract GameShowBetting is AccessControl {
     ) public onlyRole(MANAGER_ROLE) {
         require(_gameId >= 0 && _gameId <= numGames, "Invalid game ID");
         require(games[_gameId].state == GameState.OPEN, "Game is not open");
-        require(betOptionId >= 0 && games[_gameId].betOptions.length >= betOptionId, "Bet Option Id doesn't exist in options");
+        require(
+            betOptionId >= 0 && games[_gameId].betOptions.length >= betOptionId,
+            "Bet Option Id doesn't exist in options"
+        );
         console.log(
             "Game: %s - Deleting option %s - %s",
             _gameId,
@@ -124,12 +136,12 @@ contract GameShowBetting is AccessControl {
         uint256 _gameId
     ) external view returns (BetOption[] memory) {
         require(_gameId >= 0 && _gameId <= numGames, "Invalid game ID");
-        require(games[_gameId].state == GameState.OPEN, "Game is not open");
         return games[_gameId].betOptions;
     }
 
     function placeBet(uint256 _gameId, uint256 _betOption) public payable {
         require(_gameId >= 0 && _gameId <= numGames, "Invalid game ID");
+        require(msg.value > 0, "Must send an amount greater than zero");
         Game storage game = games[_gameId];
         require(game.isOpen, "Game is not open");
         game.betPlaced[msg.sender] = true;
@@ -143,11 +155,17 @@ contract GameShowBetting is AccessControl {
         emit NewBet(_gameId, _betOption);
     }
 
-    function getBet(
-        uint256 _gameId
-    ) external view returns (Bet memory) {
+    function hasPlacedBet(uint256 _gameId) external view returns (bool) {
         require(_gameId >= 0 && _gameId <= numGames, "Invalid game ID");
-        require(games[_gameId].betPlaced[msg.sender], "User didn't place bet on game ID");
+        return games[_gameId].betPlaced[msg.sender];
+    }
+
+    function getBet(uint256 _gameId) external view returns (Bet memory) {
+        require(_gameId >= 0 && _gameId <= numGames, "Invalid game ID");
+        require(
+            games[_gameId].betPlaced[msg.sender],
+            "User didn't place bet on game ID"
+        );
         return games[_gameId].betPlacedOption[msg.sender];
     }
 
@@ -156,7 +174,7 @@ contract GameShowBetting is AccessControl {
         Game storage game = games[_gameId];
         require(game.isOpen, "Game is already closed");
         game.isOpen = false;
-        uint totalFunds = 0;
+        uint256 totalFunds = 0;
         for (uint256 i = 0; i < game.betOptions.length; i++) {
             BetOption storage betOption = game.betOptions[i];
             totalFunds += betOption.totalBetAmount;
@@ -185,13 +203,25 @@ contract GameShowBetting is AccessControl {
     //     }
     // }
 
-    function declareWinners(uint256 _gameId, uint256 _winningBetOption) public onlyRole(MANAGER_ROLE) {
-        require(games[_gameId].state == GameState.CLOSED, "Game is not yet closed");
-        require(games[_gameId].betOptions.length >= _winningBetOption, "Winning bet option doesn't exist for game");
+    function declareWinners(
+        uint256 _gameId,
+        uint256 _winningBetOption
+    ) public onlyRole(MANAGER_ROLE) {
+        require(
+            games[_gameId].state == GameState.CLOSED,
+            "Game is not yet closed"
+        );
+        require(
+            games[_gameId].betOptions.length >= _winningBetOption,
+            "Winning bet option doesn't exist for game"
+        );
 
         // Validate we don't already have a winner
         for (uint i = 0; i < games[_gameId].betOptions.length; i++) {
-            require(games[_gameId].betOptions[i].wonOption == false, "Winner already declared");
+            require(
+                games[_gameId].betOptions[i].wonOption == false,
+                "Winner already declared"
+            );
         }
 
         games[_gameId].betOptions[_winningBetOption].wonOption = true;
@@ -202,11 +232,14 @@ contract GameShowBetting is AccessControl {
     }
 
     function distributeWinnings(uint256 _gameId) public onlyRole(MANAGER_ROLE) {
-        require(games[_gameId].state == GameState.WAITING_FOR_PAYOUT, "Game is not waiting for winners");
+        require(
+            games[_gameId].state == GameState.WAITING_FOR_PAYOUT,
+            "Game is not waiting for winners"
+        );
         uint winnerCount = 0;
         uint256 winningBetOption = 0;
         for (uint i = 0; i < games[_gameId].betOptions.length; i++) {
-            if(games[_gameId].betOptions[i].wonOption == true) {
+            if (games[_gameId].betOptions[i].wonOption == true) {
                 winningBetOption = i;
                 winnerCount++;
             }
@@ -214,11 +247,13 @@ contract GameShowBetting is AccessControl {
 
         require(winnerCount == 1, "Not one winner");
 
-        address[] storage winningAddresses = games[_gameId].betsByOptionId[winningBetOption];
-        uint totalFunds = games[_gameId].totalBetAmount;
-        uint numWinningBets = winningAddresses.length;
+        address[] storage winningAddresses = games[_gameId].betsByOptionId[
+            winningBetOption
+        ];
+        uint256 totalFunds = games[_gameId].totalBetAmount;
+        uint256 numWinningBets = winningAddresses.length;
         require(numWinningBets > 0, "No Winners");
-        uint winningsPerBet = totalFunds / numWinningBets;
+        uint256 winningsPerBet = totalFunds / numWinningBets;
 
         for (uint i = 0; i < winningAddresses.length; i++) {
             address winnerAddress = winningAddresses[i];

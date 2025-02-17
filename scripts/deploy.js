@@ -22,12 +22,12 @@ async function main() {
 
   console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
 
-  const Token = await ethers.getContractFactory("NounsGameShowToken");
-  const token = await Token.deploy();
-  await token.waitForDeployment();
-  let tokenAddress = await token.getAddress();
+  // const Token = await ethers.getContractFactory("NounsGameShowToken");
+  // const token = await Token.deploy();
+  // await token.waitForDeployment();
+  // let tokenAddress = await token.getAddress();
 
-  console.log("Token address:", tokenAddress);
+  // console.log("Token address:", tokenAddress);
 
   const GameShow = await ethers.getContractFactory("GameShowBetting");
   const gameShow = await GameShow.deploy();
@@ -37,7 +37,7 @@ async function main() {
   console.log("Game address:", gameAddress);
 
   // We also save the contract's artifacts and address in the frontend directory
-  saveFrontendFiles(tokenAddress);
+  saveFrontendFiles(gameAddress);
 }
 
 function saveFrontendFiles(address) {
@@ -53,12 +53,12 @@ function saveFrontendFiles(address) {
     JSON.stringify({ Token: address }, undefined, 2)
   );
 
-  const TokenArtifact = artifacts.readArtifactSync("NounsGameShowToken");
+  // const TokenArtifact = artifacts.readArtifactSync("NounsGameShowToken");
 
-  fs.writeFileSync(
-    path.join(contractsDir, "NounsGameShowToken.json"),
-    JSON.stringify(TokenArtifact, null, 2)
-  );
+  // fs.writeFileSync(
+  //   path.join(contractsDir, "NounsGameShowToken.json"),
+  //   JSON.stringify(TokenArtifact, null, 2)
+  // );
 
   const GameShowArtifact = artifacts.readArtifactSync("GameShowBetting");
 
